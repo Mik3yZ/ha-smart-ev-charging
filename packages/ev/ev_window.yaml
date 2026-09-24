@@ -56,7 +56,7 @@ template:
       - name: "EV Window Price Allowed"
         unique_id: ev_window_price_allowed
         state: >-
-          {% if is_state('input_boolean.ev_window_max_price_enabled', 'off') %}
+          {% if not is_state('input_boolean.ev_window_max_price_enabled', 'on') %}
             true
           {% else %}
             {% set max_p = states('input_number.ev_window_charging_max_price') | float(none) %}
@@ -204,10 +204,6 @@ template:
             {% set future_prices = window_prices
                  | selectattr('time', '>=', cutoff)
                  | list %}
-            {% if is_state('input_boolean.ev_window_max_price_enabled', 'on') %}
-              {% set max_p = states('input_number.ev_window_charging_max_price') | float(999) %}
-              {% set future_prices = future_prices | selectattr('price', '<=', max_p) | list %}
-            {% endif %}
 
             {% if future_prices | length == 0 %}
               []
@@ -291,10 +287,6 @@ template:
                  | selectattr('time', '>=', window_start)
                  | selectattr('time', '<', window_end)
                  | list %}
-            {% if is_state('input_boolean.ev_window_max_price_enabled', 'on') %}
-              {% set max_p = states('input_number.ev_window_charging_max_price') | float(999) %}
-              {% set window_prices = window_prices | selectattr('price', '<=', max_p) | list %}
-            {% endif %}
             {% set hours_available = window_prices | length %}
             {% set hours_int = (hours_needed | int) + (1 if (hours_needed % 1) > 0 else 0) %}
             {{ (hours_available >= hours_int) | lower }}
@@ -304,32 +296,62 @@ template:
       - name: EV Charging Debug Info
         unique_id: ev_charging_debug_info
         state: >
-          {# Debug information: future hours available, hours needed, and current timestamp #}
+          {# Concise debug summary (strictly <= 255 chars for Home Assistant state limit) #}
           {% set prices_raw = state_attr('sensor.average_electricity_price', 'prices') %}
-          {% set start_hour = states('input_number.ev_window_charging_start_hour') | int(0) %}
-          {% set end_hour = states('input_number.ev_window_charging_end_hour') | int(0) %}
           {% set hours_needed = states('sensor.ev_hours_needed_for_charging') | float(0) %}
-          {% set hours_int = (hours_needed | int) + (1 if (hours_needed % 1) > 0 else 0) %}
-          {% set window_start = states('sensor.ev_charging_window_start_time') %}
-          {% set window_end = states('sensor.ev_charging_window_end_time') %}
-
-          {% if prices_raw is none %}
-            {% set future_count = 0 %}
-            {% set total_count = 0 %}
-          {% else %}
+          {% if prices_raw is not none %}
             {% set cutoff = now().strftime('%Y-%m-%d %H:00:00') %}
             {% set future_prices = prices_raw | rejectattr('time', '<', cutoff) | list %}
-            {% set future_count = future_prices | length %}
-            {% set total_count = prices_raw | length %}
+            {{ future_prices | length }}/{{ prices_raw | length }}h avail, need {{ hours_needed }}h
+          {% else %}
+            need {{ hours_needed }}h (no price data)
           {% endif %}
-
-          Future hours available: {{ future_count }}/{{ total_count }}
-          Hours needed: {{ hours_needed }} (selecting {{ hours_int }} hours)
-          Now: {{ now().isoformat() }}
-          Cutoff: {{ now().strftime('%Y-%m-%d %H:00:00') }}
-          Night window: {{ start_hour }}:00 - {{ end_hour }}:00 {% if end_hour <= start_hour %}(crosses midnight){% endif %}
-          Window start: {{ window_start }}
-          Window end: {{ window_end }}
-          Max price enabled: {{ states('input_boolean.ev_window_max_price_enabled') }}
-          Max price: {{ states('input_number.ev_window_charging_max_price') }} EUR/kWh
-          Price allowed: {{ states('binary_sensor.ev_window_price_allowed') }}
+        attributes:
+          future_hours_available: >-
+            {% set prices_raw = state_attr('sensor.average_electricity_price', 'prices') %}
+            {% if prices_raw is none %}
+              0/0
+            {% else %}
+              {% set cutoff = now().strftime('%Y-%m-%d %H:00:00') %}
+              {% set future_prices = prices_raw | rejectattr('time', '<', cutoff) | list %}
+              {{ future_prices | length }}/{{ prices_raw | length }}
+            {% endif %}
+          hours_needed: "{{ states('sensor.ev_hours_needed_for_charging') }}"
+          night_window: >-
+            {% set start_hour = states('input_number.ev_window_charging_start_hour') | int(0) %}
+            {% set end_hour = states('input_number.ev_window_charging_end_hour') | int(0) %}
+            {{ '%02d:00' | format(start_hour) }} - {{ '%02d:00' | format(end_hour) }}{% if end_hour <= start_hour %} (crosses midnight){% endif %}
+          window_start: "{{ states('sensor.ev_charging_window_start_time') }}"
+          window_end: "{{ states('sensor.ev_charging_window_end_time') }}"
+          max_price_enabled: "{{ states('input_boolean.ev_window_max_price_enabled') }}"
+          max_price: "{{ states('input_number.ev_window_charging_max_price') }}"
+          price_allowed: "{{ states('binary_sensor.ev_window_price_allowed') }}"
+          current_price: "{{ states('sensor.frank_energie_prices_current_electricity_price_all_in') }}"
+          details: >-
+            {% set prices_raw = state_attr('sensor.average_electricity_price', 'prices') %}
+            {% set start_hour = states('input_number.ev_window_charging_start_hour') | int(0) %}
+            {% set end_hour = states('input_number.ev_window_charging_end_hour') | int(0) %}
+            {% set hours_needed = states('sensor.ev_hours_needed_for_charging') | float(0) %}
+            {% set hours_int = (hours_needed | int) + (1 if (hours_needed % 1) > 0 else 0) %}
+            {% set window_start = states('sensor.ev_charging_window_start_time') %}
+            {% set window_end = states('sensor.ev_charging_window_end_time') %}
+            {% if prices_raw is none %}
+              {% set future_count = 0 %}
+              {% set total_count = 0 %}
+            {% else %}
+              {% set cutoff = now().strftime('%Y-%m-%d %H:00:00') %}
+              {% set future_prices = prices_raw | rejectattr('time', '<', cutoff) | list %}
+              {% set future_count = future_prices | length %}
+              {% set total_count = prices_raw | length %}
+            {% endif %}
+            Future hours available: {{ future_count }}/{{ total_count }}
+            Hours needed: {{ hours_needed }} (selecting {{ hours_int }} hours)
+            Now: {{ now().isoformat() }}
+            Cutoff: {{ now().strftime('%Y-%m-%d %H:00:00') }}
+            Night window: {{ '%02d:00' | format(start_hour) }} - {{ '%02d:00' | format(end_hour) }} {% if end_hour <= start_hour %}(crosses midnight){% endif %}
+            Window start: {{ window_start }}
+            Window end: {{ window_end }}
+            Max price enabled: {{ states('input_boolean.ev_window_max_price_enabled') }}
+            Max price: {{ states('input_number.ev_window_charging_max_price') }} EUR/kWh
+            Current price: {{ states('sensor.frank_energie_prices_current_electricity_price_all_in') }} EUR/kWh
+            Price allowed: {{ states('binary_sensor.ev_window_price_allowed') }}
