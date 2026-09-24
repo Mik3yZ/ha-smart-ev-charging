@@ -27,6 +27,15 @@ input_number:
     step: 10
     icon: mdi:clock-star-four-points
 
+  ev_window_charging_max_price:
+    name: "EV Window Charging Max Price"
+    unit_of_measurement: "EUR/kWh"
+    min: -0.50
+    max: 2.00
+    step: 0.01
+    mode: box
+    icon: mdi:currency-eur
+
 input_boolean:
   ev_window_charging:
     name: "EV Window Charging"
@@ -36,9 +45,48 @@ input_boolean:
     name: "EV Dynamic Tariff Optimization (in window)"
     icon: mdi:chart-line
 
+  ev_window_max_price_enabled:
+    name: "EV Window Max Price Limit"
+    icon: mdi:cash-lock
+
 ## Templates & sensors
 
 template:
+  - binary_sensor:
+      - name: "EV Window Price Allowed"
+        unique_id: ev_window_price_allowed
+        state: >-
+          {% if is_state('input_boolean.ev_window_max_price_enabled', 'off') %}
+            true
+          {% else %}
+            {% set max_p = states('input_number.ev_window_charging_max_price') | float(none) %}
+            {% set prices_raw = state_attr('sensor.average_electricity_price', 'prices') %}
+            {% set current_prefix = now().strftime('%Y-%m-%d %H') %}
+            {% set match = prices_raw | selectattr('time', 'match', '^' + current_prefix) | list if prices_raw else [] %}
+            {% if match | length > 0 and max_p is not none %}
+              {{ (match[0].price <= max_p) | lower }}
+            {% else %}
+              {% set cur_p = states('sensor.current_electricity_market_price') | float(none) %}
+              {% if cur_p is not none and max_p is not none %}
+                {{ (cur_p <= max_p) | lower }}
+              {% else %}
+                false
+              {% endif %}
+            {% endif %}
+          {% endif %}
+        attributes:
+          max_price: "{{ states('input_number.ev_window_charging_max_price') }}"
+          max_price_enabled: "{{ states('input_boolean.ev_window_max_price_enabled') }}"
+          current_price: >-
+            {% set prices_raw = state_attr('sensor.average_electricity_price', 'prices') %}
+            {% set current_prefix = now().strftime('%Y-%m-%d %H') %}
+            {% set match = prices_raw | selectattr('time', 'match', '^' + current_prefix) | list if prices_raw else [] %}
+            {% if match | length > 0 %}
+              {{ match[0].price }}
+            {% else %}
+              {{ states('sensor.current_electricity_market_price') }}
+            {% endif %}
+
   - sensor:
       # 1) Base window start/end (purely from input_numbers + time)
       - name: EV Charging Window Start Time
@@ -171,6 +219,10 @@ template:
             {% set future_prices = window_prices
                  | selectattr('time', '>=', cutoff)
                  | list %}
+            {% if is_state('input_boolean.ev_window_max_price_enabled', 'on') %}
+              {% set max_p = states('input_number.ev_window_charging_max_price') | float(999) %}
+              {% set future_prices = future_prices | selectattr('price', '<=', max_p) | list %}
+            {% endif %}
 
             {% if future_prices | length == 0 %}
               []
@@ -254,6 +306,10 @@ template:
                  | selectattr('time', '>=', window_start)
                  | selectattr('time', '<', window_end)
                  | list %}
+            {% if is_state('input_boolean.ev_window_max_price_enabled', 'on') %}
+              {% set max_p = states('input_number.ev_window_charging_max_price') | float(999) %}
+              {% set window_prices = window_prices | selectattr('price', '<=', max_p) | list %}
+            {% endif %}
             {% set hours_available = window_prices | length %}
             {% set hours_int = (hours_needed | int) + (1 if (hours_needed % 1) > 0 else 0) %}
             {{ (hours_available >= hours_int) | lower }}
@@ -289,3 +345,6 @@ template:
           Night window: {{ start_hour }}:00 - {{ end_hour }}:00 {% if end_hour <= start_hour %}(crosses midnight){% endif %}
           Window start: {{ window_start }}
           Window end: {{ window_end }}
+          Max price enabled: {{ states('input_boolean.ev_window_max_price_enabled') }}
+          Max price: {{ states('input_number.ev_window_charging_max_price') }} EUR/kWh
+          Price allowed: {{ states('binary_sensor.ev_window_price_allowed') }}
