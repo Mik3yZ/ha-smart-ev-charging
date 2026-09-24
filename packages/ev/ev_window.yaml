@@ -36,6 +36,14 @@ input_number:
     mode: box
     icon: mdi:currency-eur
 
+  ev_safety_buffer_soc:
+    name: "EV Safety Buffer SoC"
+    unit_of_measurement: "%"
+    min: 10
+    max: 50
+    step: 5
+    icon: mdi:shield-battery-outline
+
 input_boolean:
   ev_window_charging:
     name: "EV Window Charging"
@@ -48,6 +56,14 @@ input_boolean:
   ev_window_max_price_enabled:
     name: "EV Window Max Price Limit"
     icon: mdi:cash-lock
+
+  ev_safety_buffer_enabled:
+    name: "EV Safety Buffer Enabled"
+    icon: mdi:shield-check
+
+  ev_negative_price_charging_enabled:
+    name: "EV Negative Price Charging"
+    icon: mdi:cash-fast
 
 ## Templates & sensors
 
@@ -71,6 +87,44 @@ template:
           max_price: "{{ states('input_number.ev_window_charging_max_price') }}"
           max_price_enabled: "{{ states('input_boolean.ev_window_max_price_enabled') }}"
           current_price: "{{ states('sensor.frank_energie_prices_current_electricity_price_all_in') }}"
+
+      - name: "EV Safety Buffer Active"
+        unique_id: ev_safety_buffer_active
+        icon: mdi:shield-battery-outline
+        state: >-
+          {% if is_state('input_boolean.ev_safety_buffer_enabled', 'on') %}
+            {% set cur_soc = states('sensor.skoda_elroq_battery_percentage') | float(none) %}
+            {% set min_soc = states('input_number.ev_safety_buffer_soc') | float(none) %}
+            {% if cur_soc is not none and min_soc is not none %}
+              {{ (cur_soc < min_soc) | lower }}
+            {% else %}
+              false
+            {% endif %}
+          {% else %}
+            false
+          {% endif %}
+        attributes:
+          current_soc: "{{ states('sensor.skoda_elroq_battery_percentage') }}"
+          safety_soc: "{{ states('input_number.ev_safety_buffer_soc') }}"
+          safety_buffer_enabled: "{{ states('input_boolean.ev_safety_buffer_enabled') }}"
+
+      - name: "EV Negative Price Active"
+        unique_id: ev_negative_price_active
+        icon: mdi:cash-fast
+        state: >-
+          {% if is_state('input_boolean.ev_negative_price_charging_enabled', 'on') %}
+            {% set cur_p = states('sensor.frank_energie_prices_current_electricity_price_all_in') | float(none) %}
+            {% if cur_p is not none %}
+              {{ (cur_p <= 0.0) | lower }}
+            {% else %}
+              false
+            {% endif %}
+          {% else %}
+            false
+          {% endif %}
+        attributes:
+          current_price: "{{ states('sensor.frank_energie_prices_current_electricity_price_all_in') }}"
+          negative_price_enabled: "{{ states('input_boolean.ev_negative_price_charging_enabled') }}"
 
   - sensor:
       # 1) Base window start/end (purely from input_numbers + time)
@@ -292,6 +346,76 @@ template:
             {{ (hours_available >= hours_int) | lower }}
           {% endif %}
 
+      # 8) Planned charging summary (for dashboard display)
+      - name: "EV Planned Charging Summary"
+        unique_id: ev_planned_charging_summary
+        icon: mdi:calendar-clock
+        state: >-
+          {% set s = states('sensor.ev_cheapest_hours_in_window') %}
+          {% set opt_on = is_state('input_boolean.ev_dynamic_tariff_optimization', 'on') %}
+          {% set win_on = is_state('input_boolean.ev_window_charging', 'on') %}
+          {% set hours_needed = states('sensor.ev_hours_needed_for_charging') | float(0) %}
+          {% if not win_on %}
+            Vensterladen uit
+          {% elif hours_needed == 0 %}
+            Accu op doelniveau
+          {% elif opt_on %}
+            {% if s not in ['unknown', 'unavailable', 'None', ''] %}
+              {% set list = s | from_json %}
+              {% if list | length > 0 %}
+                {% set first_time = list[0].time[11:16] %}
+                {% set last_slot = list[-1].time %}
+                {% set last_h = last_slot[11:13] | int %}
+                {% set end_h = (last_h + 1) % 24 %}
+                {{ first_time }}-{{ '%02d:00' | format(end_h) }} ({{ list | length }}u)
+              {% else %}
+                Geen uren beschikbaar
+              {% endif %}
+            {% else %}
+              Geen data
+            {% endif %}
+          {% else %}
+            {% set start_h = states('input_number.ev_window_charging_start_hour') | int(0) %}
+            {% set end_h = states('input_number.ev_window_charging_end_hour') | int(0) %}
+            {{ '%02d:00' | format(start_h) }}-{{ '%02d:00' | format(end_h) }} (vast venster)
+          {% endif %}
+        attributes:
+          planned_hours: >-
+            {% set s = states('sensor.ev_cheapest_hours_in_window') %}
+            {% if s not in ['unknown', 'unavailable', 'None', ''] %}
+              {% set list = s | from_json %}
+              {% set ns = namespace(times=[]) %}
+              {% for item in list %}
+                {% set ns.times = ns.times + [item.time[11:16]] %}
+              {% endfor %}
+              {{ ns.times | join(', ') }}
+            {% else %}
+              geen
+            {% endif %}
+          average_price: >-
+            {% set s = states('sensor.ev_cheapest_hours_in_window') %}
+            {% if s not in ['unknown', 'unavailable', 'None', ''] %}
+              {% set list = s | from_json %}
+              {% if list | length > 0 %}
+                {% set ns = namespace(p=0) %}
+                {% for item in list %}
+                  {% set ns.p = ns.p + item.price %}
+                {% endfor %}
+                {{ (ns.p / (list | length)) | round(4) }}
+              {% else %}
+                0
+              {% endif %}
+            {% else %}
+              0
+            {% endif %}
+          hours_count: >-
+            {% set s = states('sensor.ev_cheapest_hours_in_window') %}
+            {% if s not in ['unknown', 'unavailable', 'None', ''] %}
+              {{ (s | from_json) | length }}
+            {% else %}
+              0
+            {% endif %}
+
       # Might be useful for debugging. Disable when all works fine.
       - name: EV Charging Debug Info
         unique_id: ev_charging_debug_info
@@ -327,6 +451,8 @@ template:
           max_price: "{{ states('input_number.ev_window_charging_max_price') }}"
           price_allowed: "{{ states('binary_sensor.ev_window_price_allowed') }}"
           current_price: "{{ states('sensor.frank_energie_prices_current_electricity_price_all_in') }}"
+          safety_buffer_active: "{{ states('binary_sensor.ev_safety_buffer_active') }}"
+          negative_price_active: "{{ states('binary_sensor.ev_negative_price_active') }}"
           details: >-
             {% set prices_raw = state_attr('sensor.average_electricity_price', 'prices') %}
             {% set start_hour = states('input_number.ev_window_charging_start_hour') | int(0) %}

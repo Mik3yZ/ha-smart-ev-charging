@@ -146,6 +146,9 @@ script:
       - action: input_number.set_value
         target: { entity_id: input_number.ev_window_charging_max_price }
         data: { value: 0.20 }
+      - action: input_number.set_value
+        target: { entity_id: input_number.ev_safety_buffer_soc }
+        data: { value: 25 }
       # Solar phase-switch thresholds — match the previously hard-coded values
       - action: input_number.set_value
         target: { entity_id: input_number.ev_solar_switch_to_3phase_threshold_w }
@@ -169,6 +172,8 @@ script:
             - input_boolean.ev_window_charging
             - input_boolean.ev_dynamic_tariff_optimization
             - input_boolean.ev_window_max_price_enabled
+            - input_boolean.ev_safety_buffer_enabled
+            - input_boolean.ev_negative_price_charging_enabled
       - action: input_boolean.turn_on
         target:
           entity_id: input_boolean.ev_notifications_enabled
@@ -275,6 +280,8 @@ template:
         unit_of_measurement: "%"
         state: >
           {% set is_force_charging = is_state('input_boolean.ev_force_charge_once', 'on') or is_state('input_boolean.ev_force_charge_permanent', 'on') %}
+          {% set safety_buffer_active = is_state('binary_sensor.ev_safety_buffer_active', 'on') %}
+          {% set negative_price_active = is_state('binary_sensor.ev_negative_price_active', 'on') %}
           {% set is_window_active = is_state('sensor.ev_charging_window_active', 'true') and is_state('input_boolean.ev_window_charging', 'on') %}
           {% set is_in_cheapest_window = is_state('sensor.ev_is_in_cheapest_window', 'true') %}
           {% set prefer_tariff_over_solar = is_state('input_boolean.ev_charge_prefer_tariff_over_solar', 'on') %}
@@ -288,6 +295,10 @@ template:
                                       is_state(batt_assist_e, 'on') %}
           {% if is_force_charging %}
             {{ states('input_number.ev_charging_limit_force') | int }}
+          {% elif safety_buffer_active %}
+            {{ states('input_number.ev_safety_buffer_soc') | int }}
+          {% elif negative_price_active %}
+            {{ states('input_number.ev_charging_limit_window') | int }}
           {% elif battery_assist_on %}
             {{ states('input_number.ev_charging_limit_solar') | int }}
           {% elif solar_enabled and prefer_tariff_over_solar and is_window_active and tarif_optimization and is_in_cheapest_window and price_allowed %}
@@ -307,6 +318,8 @@ template:
         unique_id: ev_charging_mode
         state: >
           {% set is_force_charging = is_state('input_boolean.ev_force_charge_once', 'on') or is_state('input_boolean.ev_force_charge_permanent', 'on') %}
+          {% set safety_buffer_active = is_state('binary_sensor.ev_safety_buffer_active', 'on') %}
+          {% set negative_price_active = is_state('binary_sensor.ev_negative_price_active', 'on') %}
           {% set is_window_active = is_state('sensor.ev_charging_window_active', 'true') and is_state('input_boolean.ev_window_charging', 'on') %}
           {% set is_in_cheapest_window = is_state('sensor.ev_is_in_cheapest_window', 'true') %}
           {% set prefer_tariff_over_solar = is_state('input_boolean.ev_charge_prefer_tariff_over_solar', 'on') %}
@@ -320,6 +333,10 @@ template:
                                       is_state(batt_assist_e, 'on') %}
           {% if is_force_charging %}
             force
+          {% elif safety_buffer_active %}
+            safety_buffer
+          {% elif negative_price_active %}
+            negative_price
           {% elif battery_assist_on %}
             battery_assist
           {% elif solar_enabled and prefer_tariff_over_solar and is_window_active and tarif_optimization and is_in_cheapest_window and price_allowed %}
@@ -579,6 +596,8 @@ automation:
           - input_boolean.ev_solar_charging
           - input_boolean.ev_battery_assist_charging
           - input_boolean.ev_window_charging
+          - input_boolean.ev_safety_buffer_enabled
+          - input_boolean.ev_negative_price_charging_enabled
           - binary_sensor.ev_is_charging
           - binary_sensor.ev_is_connected
         to: "on"
@@ -631,6 +650,8 @@ automation:
           - "force"
           - "cheapest"
           - "window"
+          - "safety_buffer"
+          - "negative_price"
         id: mode_full_power
         for: "00:00:30"
         # not_from:
@@ -693,6 +714,8 @@ automation:
                   - "force"
                   - "cheapest"
                   - "window"
+                  - "safety_buffer"
+                  - "negative_price"
             sequence:
               - action: number.set_value # maximize power
                 target:

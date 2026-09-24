@@ -419,6 +419,66 @@ automation:
             data:
               notification_id: ev_power_entity_unit_mismatch
 
+  - id: ev_delayed_charging_price_notification
+    alias: "EV Charging - Delayed Due To High Price"
+    description: "Notify when EV is connected in active window but charging is postponed due to high electricity price."
+    mode: single
+    max_exceeded: silent
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.ev_window_price_allowed
+        to: "off"
+        for: "00:02:00"
+      - trigger: state
+        entity_id: binary_sensor.ev_is_connected
+        to: "on"
+        for: "00:02:00"
+      - trigger: state
+        entity_id: sensor.ev_charging_window_active
+        to: "true"
+        for: "00:02:00"
+    conditions:
+      - condition: state
+        entity_id: input_boolean.ev_notifications_enabled
+        state: "on"
+      - condition: state
+        entity_id: input_boolean.ev_manual_override
+        state: "off"
+      - condition: state
+        entity_id: binary_sensor.ev_is_connected
+        state: "on"
+      - condition: state
+        entity_id: input_boolean.ev_window_charging
+        state: "on"
+      - condition: state
+        entity_id: input_boolean.ev_window_max_price_enabled
+        state: "on"
+      - condition: state
+        entity_id: binary_sensor.ev_window_price_allowed
+        state: "off"
+      - condition: state
+        entity_id: sensor.ev_charging_window_active
+        state: "true"
+      # Only notify if charging is not active in another mode
+      - condition: template
+        value_template: >-
+          {{ states('sensor.ev_charging_mode') in ['none', 'unknown', 'unavailable'] }}
+    actions:
+      - action: script.ev_notify_dispatch
+        data:
+          title: "EV Laden Uitgesteld (Prijs te hoog)"
+          message: >-
+            {% set cur_p = states('sensor.frank_energie_prices_current_electricity_price_all_in') %}
+            {% set max_p = states('input_number.ev_window_charging_max_price') %}
+            {% set summary = states('sensor.ev_planned_charging_summary') %}
+            EV laden uitgesteld: het huidige tarief (€{{ cur_p }}/kWh) ligt boven jouw max prijs (€{{ max_p }}/kWh).
+            {% if summary not in ['unknown', 'unavailable', 'None', 'Geen data', 'Geen uren beschikbaar', 'Vensterladen uit'] %}
+            Geplande laaduren: {{ summary }}.
+            {% endif %}
+          tag: ev_price_delayed
+          color: orange
+          priority: high
+
 script:
   # Sends a notification to the configured legacy notify.* service,
   # falling back to persistent_notification if the helper is empty.

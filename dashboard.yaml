@@ -180,6 +180,14 @@ views:
             name: Window Max Price (€/kWh)
           - entity: input_boolean.ev_charge_prefer_tariff_over_solar
           - type: divider
+          - entity: input_boolean.ev_safety_buffer_enabled
+            name: Safety Buffer (Min SoC)
+          - entity: input_number.ev_safety_buffer_soc
+            name: Safety Buffer Target (% SoC)
+          - type: divider
+          - entity: input_boolean.ev_negative_price_charging_enabled
+            name: Negative Price Fast Charge (<= €0,00)
+          - type: divider
           - entity: input_boolean.ev_force_charge_permanent
             name: Force Max Charge (permanent)
           - entity: input_boolean.ev_force_charge_once
@@ -279,6 +287,8 @@ views:
       - type: entities
         title: Window Charging
         entities:
+          - entity: sensor.ev_planned_charging_summary
+            name: Planned Charging Summary
           - entity: sensor.ev_charging_window_start_time
             name: EV Charging Start Time
           - entity: sensor.ev_charging_window_end_time
@@ -286,6 +296,10 @@ views:
           - entity: sensor.ev_charging_window_active
           - entity: binary_sensor.ev_window_price_allowed
             name: Window Price Allowed (below max)
+          - entity: binary_sensor.ev_safety_buffer_active
+            name: Safety Buffer Active (< Min SoC)
+          - entity: binary_sensor.ev_negative_price_active
+            name: Negative Price Active (<= €0,00)
           - entity: sensor.ev_hours_needed_for_charging
           - entity: sensor.ev_cheapest_hours_in_window
           - entity: sensor.ev_window_latest_start_time
