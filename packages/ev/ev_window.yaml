@@ -60,32 +60,17 @@ template:
             true
           {% else %}
             {% set max_p = states('input_number.ev_window_charging_max_price') | float(none) %}
-            {% set prices_raw = state_attr('sensor.average_electricity_price', 'prices') %}
-            {% set current_prefix = now().strftime('%Y-%m-%d %H') %}
-            {% set match = prices_raw | selectattr('time', 'match', '^' + current_prefix) | list if prices_raw else [] %}
-            {% if match | length > 0 and max_p is not none %}
-              {{ (match[0].price <= max_p) | lower }}
+            {% set cur_p = states('sensor.frank_energie_prices_current_electricity_price_all_in') | float(none) %}
+            {% if cur_p is not none and max_p is not none %}
+              {{ (cur_p <= max_p) | lower }}
             {% else %}
-              {% set cur_p = states('sensor.current_electricity_market_price') | float(none) %}
-              {% if cur_p is not none and max_p is not none %}
-                {{ (cur_p <= max_p) | lower }}
-              {% else %}
-                false
-              {% endif %}
+              false
             {% endif %}
           {% endif %}
         attributes:
           max_price: "{{ states('input_number.ev_window_charging_max_price') }}"
           max_price_enabled: "{{ states('input_boolean.ev_window_max_price_enabled') }}"
-          current_price: >-
-            {% set prices_raw = state_attr('sensor.average_electricity_price', 'prices') %}
-            {% set current_prefix = now().strftime('%Y-%m-%d %H') %}
-            {% set match = prices_raw | selectattr('time', 'match', '^' + current_prefix) | list if prices_raw else [] %}
-            {% if match | length > 0 %}
-              {{ match[0].price }}
-            {% else %}
-              {{ states('sensor.current_electricity_market_price') }}
-            {% endif %}
+          current_price: "{{ states('sensor.frank_energie_prices_current_electricity_price_all_in') }}"
 
   - sensor:
       # 1) Base window start/end (purely from input_numbers + time)
