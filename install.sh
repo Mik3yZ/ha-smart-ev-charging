@@ -14,7 +14,7 @@
 
 set -euo pipefail
 
-REPO="Dennis-Q/ha-smart-ev-charging"
+REPO="Mik3yZ/ha-smart-ev-charging"
 VERSION="${EV_VERSION:-}"
 CONFIG_DIR="$(pwd)"
 
